@@ -4,16 +4,7 @@ import path from "path";
 import compression from "compression";
 import mustache from "mustache";
 
-export async function host(
-  app: express.Express,
-  {
-    createTitle,
-    createDescription,
-  }: {
-    createTitle: (req: express.Request) => string;
-    createDescription: (req: express.Request) => string;
-  }
-) {
+export async function host(app: express.Express) {
   const isProduction = process.env.NODE_ENV === "production";
   if (isProduction) {
     // production server code
@@ -52,11 +43,14 @@ export async function host(
           path.resolve(__dirname, "ssr", "entry-ssr.mjs")
         );
 
-        const appHtml = await render(url);
+        const { appHtml, head, htmlAttributes, bodyAttributes } = await render(
+          url
+        );
 
         const html = mustache.render(template, {
-          title: createTitle(req),
-          description: createDescription(req),
+          head,
+          htmlAttributes,
+          bodyAttributes,
           ssrOutlet: appHtml,
         });
 
@@ -108,12 +102,15 @@ export async function host(
         // 4. render the app HTML. This assumes entry-ssr.js's exported `render`
         //    function calls appropriate framework SSR APIs,
         //    e.g. ReactDOMServer.renderToString()
-        const appHtml = await render(url);
+        const { appHtml, head, htmlAttributes, bodyAttributes } = await render(
+          url
+        );
 
         // 5. Inject the app-rendered HTML into the template.
         const html = mustache.render(template, {
-          title: createTitle(req),
-          description: createDescription(req),
+          head,
+          htmlAttributes,
+          bodyAttributes,
           ssrOutlet: appHtml,
         });
 

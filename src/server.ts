@@ -11,10 +11,7 @@ async function createServer() {
 
   app = await api(app);
 
-  app = await host(app, {
-    createTitle: () => "title",
-    createDescription: () => "description",
-  });
+  app = await host(app);
 
   app.listen(port, () => {
     console.log(`listening on http://localhost:${port}.`);
