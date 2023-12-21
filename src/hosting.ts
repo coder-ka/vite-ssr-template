@@ -40,7 +40,7 @@ export async function host(app: express.Express) {
 
       try {
         const { render } = await import(
-          path.resolve(__dirname, "ssr", "entry-ssr.mjs")
+          path.resolve(__dirname, "ssr", "entry-ssr.js")
         );
 
         const { appHtml, head, htmlAttributes, bodyAttributes } = await render(
