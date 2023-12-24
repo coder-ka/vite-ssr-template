@@ -1,29 +1,21 @@
-import React from "react";
-import { renderToString } from "react-dom/server";
-import { Router } from "wouter";
+import { renderToPipeableStream } from "react-dom/server";
 import App from "./App";
-import { Helmet } from "react-helmet";
 
-export async function render(url: string) {
-  const appHtml = renderToString(
-    <React.StrictMode>
-      <Router ssrPath={url}>
-        <App />
-      </Router>
-    </React.StrictMode>
-  );
-
-  const helmet = Helmet.renderStatic();
-
-  return {
-    appHtml,
-    htmlAttributes: helmet.htmlAttributes.toString(),
-    bodyAttributes: helmet.bodyAttributes.toString(),
-    head: [
-      helmet.title.toString(),
-      helmet.meta.toString(),
-      helmet.link.toString(),
-      helmet.base.toString(),
-    ].join(""),
-  };
+export async function render<Writable extends NodeJS.WritableStream>(
+  url: string,
+  response: Writable,
+  headInjection = ""
+): Promise<Writable> {
+  return new Promise((res) => {
+    const { pipe } = renderToPipeableStream(
+      <App ssrPath={url} headInjection={headInjection} />,
+      {
+        onShellReady() {
+          res(pipe(response));
+        },
+      }
+    );
+  });
 }
+
+export type ServerSideRenderFn = typeof render;

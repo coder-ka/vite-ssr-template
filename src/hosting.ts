@@ -1,15 +1,13 @@
 import express from "express";
-import fs from "fs/promises";
 import path from "path";
 import compression from "compression";
-import mustache from "mustache";
 import getPort from "get-port";
+import { StringWritable } from "./stream-util";
+import { ServerSideRenderFn } from "./entry-ssr";
 
 export async function host(app: express.Express) {
   const isProduction = process.env.NODE_ENV === "production";
   if (isProduction) {
-    // production server code
-
     app.use(compression());
 
     app.use(
@@ -24,41 +22,25 @@ export async function host(app: express.Express) {
               "Cache-Control",
               "public, max-age=31536000, immutable"
             );
-            // gzip
-            // res.setHeader("Content-Encoding", "gzip");
           }
         },
       })
     );
 
     app.use(async (req, res, next) => {
-      const template = await fs.readFile(
-        path.resolve(__dirname, "client", "index.html"),
-        "utf-8"
-      );
-
       const url = req.originalUrl;
 
       try {
-        const { render } = await import(
+        const { render } = (await import(
           path.resolve(__dirname, "ssr", "entry-ssr.js")
+        )) as { render: ServerSideRenderFn };
+
+        render(
+          url,
+          res
+            .status(200)
+            .set({ "Content-Type": "text/html", "Cache-Control": "no-cache" })
         );
-
-        const { appHtml, head, htmlAttributes, bodyAttributes } = await render(
-          url
-        );
-
-        const html = mustache.render(template, {
-          head,
-          htmlAttributes,
-          bodyAttributes,
-          ssrOutlet: appHtml,
-        });
-
-        res
-          .status(200)
-          .set({ "Content-Type": "text/html", "Cache-Control": "no-cache" })
-          .end(html);
       } catch (e) {
         next(e);
       }
@@ -87,41 +69,22 @@ export async function host(app: express.Express) {
       const url = req.originalUrl;
 
       try {
-        // 1. Read index.html
-        let template = await fs.readFile(
-          path.resolve(__dirname, "..", "index.html"),
-          "utf-8"
-        );
-
-        // 2. Apply Vite HTML transforms. This injects the Vite HMR client, and
-        //    also applies HTML transforms from Vite plugins, e.g. global preambles
-        //    from @vitejs/plugin-react
-        template = await vite.transformIndexHtml(url, template);
-
-        // 3. Load the server entry. vite.ssrLoadModule automatically transforms
-        //    your ESM source code to be usable in Node.js! There is no bundling
-        //    required, and provides efficient invalidation similar to HMR.
-        const { render } = await vite.ssrLoadModule(
+        const { render } = (await vite.ssrLoadModule(
           path.resolve(__dirname, "..", "src", "entry-ssr.tsx")
+        )) as { render: ServerSideRenderFn };
+
+        const stringWritable = new StringWritable();
+        const rendered = await render(url, stringWritable);
+
+        rendered.end();
+
+        const html = await vite.transformIndexHtml(
+          url,
+          rendered.data +
+            `<script type="module" src="/src/entry-client.tsx"></script>`
         );
 
-        // 4. render the app HTML. This assumes entry-ssr.js's exported `render`
-        //    function calls appropriate framework SSR APIs,
-        //    e.g. ReactDOMServer.renderToString()
-        const { appHtml, head, htmlAttributes, bodyAttributes } = await render(
-          url
-        );
-
-        // 5. Inject the app-rendered HTML into the template.
-        const html = mustache.render(template, {
-          head,
-          htmlAttributes,
-          bodyAttributes,
-          ssrOutlet: appHtml,
-        });
-
-        // 6. Send the rendered HTML back.
-        res.status(200).set({ "Content-Type": "text/html" }).end(html);
+        res.status(200).setHeader("content-type", "text/html").end(html);
       } catch (e) {
         // If an error is caught, let Vite fix the stack trace so it maps back to
         // your actual source code.
