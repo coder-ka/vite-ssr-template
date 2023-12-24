@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import compression from "compression";
 import mustache from "mustache";
+import getPort from "get-port";
 
 export async function host(app: express.Express) {
   const isProduction = process.env.NODE_ENV === "production";
@@ -69,7 +70,12 @@ export async function host(app: express.Express) {
     // 'custom', disabling Vite's own HTML serving logic so parent server
     // can take control
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: {
+          port: await getPort(),
+        },
+      },
       appType: "custom",
     });
 
