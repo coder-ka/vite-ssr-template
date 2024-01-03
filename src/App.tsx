@@ -2,7 +2,7 @@ import React from "react";
 import { Router, Link, Route, Switch } from "wouter";
 import { PageBase } from "./PageBase";
 
-function App({ ssrPath }: { ssrPath?: string; headInjection?: string }) {
+function App({ ssrPath }: { ssrPath?: string }) {
   return (
     <React.StrictMode>
       <html lang="en">
@@ -10,13 +10,18 @@ function App({ ssrPath }: { ssrPath?: string; headInjection?: string }) {
           <Switch>
             <Route path="/">
               <PageBase subtitle="home" description="this is home">
-                <Link href="/about">
-                  <a className="text-blue-500 underline">About Us</a>
-                </Link>
-                <br />
-                <Link href="/users/john">
-                  <a className="text-blue-500 underline">Profile</a>
-                </Link>
+                <ul>
+                  <li>
+                    <Link href="/about">
+                      <a className="text-blue-500 underline">About Us</a>
+                    </Link>
+                  </li>
+                  <li>
+                    <Link href="/users/john">
+                      <a className="text-blue-500 underline">Profile</a>
+                    </Link>
+                  </li>
+                </ul>
               </PageBase>
             </Route>
             <Route path="/about">

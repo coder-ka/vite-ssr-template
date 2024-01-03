@@ -6,7 +6,7 @@ import { api } from "./api";
 async function createServer() {
   let app = express();
   const port = await getPort({
-    port: parseInt(process.env.PORT || "8089"),
+    port: parseInt(process.env.PORT || "5173"),
   });
 
   app = await api(app);

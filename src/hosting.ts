@@ -2,16 +2,22 @@ import express from "express";
 import path from "path";
 import compression from "compression";
 import getPort from "get-port";
-import { StringWritable } from "./stream-util";
 import { ServerSideRenderFn } from "./entry-ssr";
+import { Transform, TransformCallback } from "stream";
+import { ViteDevServer } from "vite";
+import { parse as parseHTML } from "node-html-parser";
+import { readFile } from "fs/promises";
+import { RewritingStream } from "parse5-html-rewriting-stream";
 
 export async function host(app: express.Express) {
   const isProduction = process.env.NODE_ENV === "production";
   if (isProduction) {
     app.use(compression());
 
+    const clientDir = path.resolve(__dirname, "client");
+
     app.use(
-      express.static(path.resolve(__dirname, "client"), {
+      express.static(clientDir, {
         index: false,
         setHeaders(res, filePath) {
           if (path.basename(filePath) === "index.html") {
@@ -27,6 +33,11 @@ export async function host(app: express.Express) {
       })
     );
 
+    const indexHTMLPath = path.join(clientDir, "index.html");
+    const indexHTML = await readFile(indexHTMLPath, "utf-8");
+    const indexHTMLRoot = parseHTML(indexHTML);
+    const headInjection = indexHTMLRoot.querySelector("head")?.innerHTML || "";
+
     app.use(async (req, res, next) => {
       const url = req.originalUrl;
 
@@ -35,8 +46,9 @@ export async function host(app: express.Express) {
           path.resolve(__dirname, "ssr", "entry-ssr.js")
         )) as { render: ServerSideRenderFn };
 
-        render(
-          url,
+        const { pipe } = await render(url);
+
+        pipe(createStreamToInsertCodeAtEndOfTag("head", headInjection)).pipe(
           res
             .status(200)
             .set({ "Content-Type": "text/html", "Cache-Control": "no-cache" })
@@ -73,18 +85,16 @@ export async function host(app: express.Express) {
           path.resolve(__dirname, "..", "src", "entry-ssr.tsx")
         )) as { render: ServerSideRenderFn };
 
-        const stringWritable = new StringWritable();
-        const rendered = await render(url, stringWritable);
+        const { pipe } = await render(url);
 
-        rendered.end();
-
-        const html = await vite.transformIndexHtml(
-          url,
-          rendered.data +
+        pipe(
+          createStreamToInsertCodeAtEndOfTag(
+            "body",
             `<script type="module" src="/src/entry-client.tsx"></script>`
-        );
-
-        res.status(200).setHeader("content-type", "text/html").end(html);
+          )
+        )
+          .pipe(new ViteTransformIndexHtmlTransform(url, vite))
+          .pipe(res.status(200).setHeader("content-type", "text/html"));
       } catch (e) {
         // If an error is caught, let Vite fix the stack trace so it maps back to
         // your actual source code.
@@ -95,4 +105,71 @@ export async function host(app: express.Express) {
   }
 
   return app;
+}
+
+class ViteTransformIndexHtmlTransform extends Transform {
+  private chunks: Buffer[];
+
+  constructor(private url: string, private vite: ViteDevServer) {
+    super();
+    this.chunks = [];
+  }
+
+  _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: TransformCallback
+  ): void {
+    this.chunks.push(chunk);
+    callback();
+  }
+
+  _flush(callback: TransformCallback): void {
+    const html = Buffer.concat(this.chunks).toString("utf-8");
+
+    console.log("■■■■■■■■■■■■■■■■■■■■■■■■■■■■");
+    console.log(html);
+    console.log("■■■■■■■■■■■■■■■■■■■■■■■■■■■■");
+
+    this.vite.transformIndexHtml(this.url, html).then((html) => {
+      this.push(html);
+      this.chunks = [];
+      callback();
+    });
+  }
+}
+
+function createStreamToInsertCodeAtEndOfTag(
+  targetTagName: string,
+  codeToInsert: string
+): Transform {
+  const rewritingStream = new RewritingStream();
+  const transformStream = new Transform();
+
+  rewritingStream.on("startTag", (startTag) => {
+    rewritingStream.emitStartTag(startTag);
+  });
+
+  rewritingStream.on("endTag", (endTag) => {
+    if (endTag.tagName === targetTagName) {
+      rewritingStream.emitRaw(codeToInsert);
+    }
+    rewritingStream.emitEndTag(endTag);
+  });
+
+  transformStream._transform = function (chunk, _, callback) {
+    const stringChunk = chunk.toString();
+    rewritingStream.write(stringChunk);
+    callback();
+  };
+
+  rewritingStream.on("data", (chunk) => {
+    transformStream.push(Buffer.from(chunk));
+  });
+
+  rewritingStream.on("end", () => {
+    transformStream.end();
+  });
+
+  return transformStream;
 }

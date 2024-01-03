@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import "./index.css";
 
 export function PageBase({
   subtitle,
