@@ -1,7 +1,7 @@
 # vite-ssr-template 💁‍♂️
 
 - ⚡ Vite (SSR)
-- 🌊 Tailwindcss
+- 🌊 TailwindCSS
 - 🐒 Wouter
 - 🚢 Docker
 - 🔯 React@18 (Async SSR)
