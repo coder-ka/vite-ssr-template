@@ -4,4 +4,4 @@
 - 🌊 TailwindCSS
 - 🐒 Wouter
 - 🚢 Docker
-- 🔯 React@18 (Async SSR)
+- 🔯 React v18 (Async SSR)
