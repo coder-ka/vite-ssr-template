@@ -1,19 +1,23 @@
 import express from "express";
-import fs from "fs/promises";
 import path from "path";
 import compression from "compression";
-import mustache from "mustache";
 import getPort from "get-port";
+import { ServerSideRenderFn } from "./entry-ssr";
+import { Transform, TransformCallback } from "stream";
+import { ViteDevServer } from "vite";
+import { parse as parseHTML } from "node-html-parser";
+import { readFile } from "fs/promises";
+import { RewritingStream } from "parse5-html-rewriting-stream";
 
 export async function host(app: express.Express) {
   const isProduction = process.env.NODE_ENV === "production";
   if (isProduction) {
-    // production server code
-
     app.use(compression());
 
+    const clientDir = path.resolve(__dirname, "client");
+
     app.use(
-      express.static(path.resolve(__dirname, "client"), {
+      express.static(clientDir, {
         index: false,
         setHeaders(res, filePath) {
           if (path.basename(filePath) === "index.html") {
@@ -24,41 +28,31 @@ export async function host(app: express.Express) {
               "Cache-Control",
               "public, max-age=31536000, immutable"
             );
-            // gzip
-            // res.setHeader("Content-Encoding", "gzip");
           }
         },
       })
     );
 
-    app.use(async (req, res, next) => {
-      const template = await fs.readFile(
-        path.resolve(__dirname, "client", "index.html"),
-        "utf-8"
-      );
+    const indexHTMLPath = path.join(clientDir, "index.html");
+    const indexHTML = await readFile(indexHTMLPath, "utf-8");
+    const indexHTMLRoot = parseHTML(indexHTML);
+    const headInjection = indexHTMLRoot.querySelector("head")?.innerHTML || "";
 
+    app.use(async (req, res, next) => {
       const url = req.originalUrl;
 
       try {
-        const { render } = await import(
+        const { render } = (await import(
           path.resolve(__dirname, "ssr", "entry-ssr.js")
+        )) as { render: ServerSideRenderFn };
+
+        const { pipe } = await render(url);
+
+        pipe(createStreamToInsertCodeAtEndOfTag("head", headInjection)).pipe(
+          res
+            .status(200)
+            .set({ "Content-Type": "text/html", "Cache-Control": "no-cache" })
         );
-
-        const { appHtml, head, htmlAttributes, bodyAttributes } = await render(
-          url
-        );
-
-        const html = mustache.render(template, {
-          head,
-          htmlAttributes,
-          bodyAttributes,
-          ssrOutlet: appHtml,
-        });
-
-        res
-          .status(200)
-          .set({ "Content-Type": "text/html", "Cache-Control": "no-cache" })
-          .end(html);
       } catch (e) {
         next(e);
       }
@@ -87,41 +81,20 @@ export async function host(app: express.Express) {
       const url = req.originalUrl;
 
       try {
-        // 1. Read index.html
-        let template = await fs.readFile(
-          path.resolve(__dirname, "..", "index.html"),
-          "utf-8"
-        );
-
-        // 2. Apply Vite HTML transforms. This injects the Vite HMR client, and
-        //    also applies HTML transforms from Vite plugins, e.g. global preambles
-        //    from @vitejs/plugin-react
-        template = await vite.transformIndexHtml(url, template);
-
-        // 3. Load the server entry. vite.ssrLoadModule automatically transforms
-        //    your ESM source code to be usable in Node.js! There is no bundling
-        //    required, and provides efficient invalidation similar to HMR.
-        const { render } = await vite.ssrLoadModule(
+        const { render } = (await vite.ssrLoadModule(
           path.resolve(__dirname, "..", "src", "entry-ssr.tsx")
-        );
+        )) as { render: ServerSideRenderFn };
 
-        // 4. render the app HTML. This assumes entry-ssr.js's exported `render`
-        //    function calls appropriate framework SSR APIs,
-        //    e.g. ReactDOMServer.renderToString()
-        const { appHtml, head, htmlAttributes, bodyAttributes } = await render(
-          url
-        );
+        const { pipe } = await render(url);
 
-        // 5. Inject the app-rendered HTML into the template.
-        const html = mustache.render(template, {
-          head,
-          htmlAttributes,
-          bodyAttributes,
-          ssrOutlet: appHtml,
-        });
-
-        // 6. Send the rendered HTML back.
-        res.status(200).set({ "Content-Type": "text/html" }).end(html);
+        pipe(
+          createStreamToInsertCodeAtEndOfTag(
+            "body",
+            `<script type="module" src="/src/entry-client.tsx"></script>`
+          )
+        )
+          .pipe(new ViteTransformIndexHtmlTransform(url, vite))
+          .pipe(res.status(200).setHeader("content-type", "text/html"));
       } catch (e) {
         // If an error is caught, let Vite fix the stack trace so it maps back to
         // your actual source code.
@@ -132,4 +105,67 @@ export async function host(app: express.Express) {
   }
 
   return app;
+}
+
+class ViteTransformIndexHtmlTransform extends Transform {
+  private chunks: Buffer[];
+
+  constructor(private url: string, private vite: ViteDevServer) {
+    super();
+    this.chunks = [];
+  }
+
+  _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: TransformCallback
+  ): void {
+    this.chunks.push(chunk);
+    callback();
+  }
+
+  _flush(callback: TransformCallback): void {
+    const html = Buffer.concat(this.chunks).toString("utf-8");
+
+    this.vite.transformIndexHtml(this.url, html).then((html) => {
+      this.push(html);
+      this.chunks = [];
+      callback();
+    });
+  }
+}
+
+function createStreamToInsertCodeAtEndOfTag(
+  targetTagName: string,
+  codeToInsert: string
+): Transform {
+  const rewritingStream = new RewritingStream();
+  const transformStream = new Transform();
+
+  rewritingStream.on("startTag", (startTag) => {
+    rewritingStream.emitStartTag(startTag);
+  });
+
+  rewritingStream.on("endTag", (endTag) => {
+    if (endTag.tagName === targetTagName) {
+      rewritingStream.emitRaw(codeToInsert);
+    }
+    rewritingStream.emitEndTag(endTag);
+  });
+
+  transformStream._transform = function (chunk, _, callback) {
+    const stringChunk = chunk.toString();
+    rewritingStream.write(stringChunk);
+    callback();
+  };
+
+  rewritingStream.on("data", (chunk) => {
+    transformStream.push(Buffer.from(chunk));
+  });
+
+  rewritingStream.on("end", () => {
+    transformStream.end();
+  });
+
+  return transformStream;
 }
