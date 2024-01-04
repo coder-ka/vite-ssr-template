@@ -127,10 +127,6 @@ class ViteTransformIndexHtmlTransform extends Transform {
   _flush(callback: TransformCallback): void {
     const html = Buffer.concat(this.chunks).toString("utf-8");
 
-    console.log("■■■■■■■■■■■■■■■■■■■■■■■■■■■■");
-    console.log(html);
-    console.log("■■■■■■■■■■■■■■■■■■■■■■■■■■■■");
-
     this.vite.transformIndexHtml(this.url, html).then((html) => {
       this.push(html);
       this.chunks = [];
