@@ -89,11 +89,15 @@ export async function host(app: express.Express) {
 
         pipe(
           createStreamToInsertCodeAtEndOfTag(
-            "body",
-            `<script type="module" src="/src/entry-client.tsx"></script>`
+            "html",
+            `<script type="module" src="/src/entry-client.tsx"></script>`,
+            {
+              insertAfter: true,
+            }
           )
         )
-          .pipe(new ViteTransformIndexHtmlTransform(url, vite))
+          // .pipe(new ViteTransformIndexHtmlTransform(url, vite))
+          .pipe(new TransformIndexHtmlForViteAndReactTransform())
           .pipe(res.status(200).setHeader("content-type", "text/html"));
       } catch (e) {
         // If an error is caught, let Vite fix the stack trace so it maps back to
@@ -127,17 +131,50 @@ class ViteTransformIndexHtmlTransform extends Transform {
   _flush(callback: TransformCallback): void {
     const html = Buffer.concat(this.chunks).toString("utf-8");
 
-    this.vite.transformIndexHtml(this.url, html).then((html) => {
-      this.push(html);
+    this.vite.transformIndexHtml(this.url, html).then((transformed) => {
+      this.push(transformed);
       this.chunks = [];
       callback();
     });
   }
 }
 
+const REACT_FAST_REFRESH_PREAMBLE = `import RefreshRuntime from '/@react-refresh'
+RefreshRuntime.injectIntoGlobalHook(window)
+window.$RefreshReg$ = () => {}
+window.$RefreshSig$ = () => (type) => type
+window.__vite_plugin_react_preamble_installed__ = true`;
+
+class TransformIndexHtmlForViteAndReactTransform extends Transform {
+  constructor() {
+    super();
+  }
+
+  _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: TransformCallback
+  ): void {
+    this.push(chunk.toString("utf8"));
+    callback();
+  }
+
+  _flush(callback: TransformCallback): void {
+    this.push(
+      `<script type="module" src="/@vite/client"></script>` +
+        `<script type="module" async>${REACT_FAST_REFRESH_PREAMBLE}</script>`
+    );
+
+    callback();
+  }
+}
+
 function createStreamToInsertCodeAtEndOfTag(
   targetTagName: string,
-  codeToInsert: string
+  codeToInsert: string,
+  options = {
+    insertAfter: false,
+  }
 ): Transform {
   const rewritingStream = new RewritingStream();
   const transformStream = new Transform();
@@ -147,10 +184,13 @@ function createStreamToInsertCodeAtEndOfTag(
   });
 
   rewritingStream.on("endTag", (endTag) => {
-    if (endTag.tagName === targetTagName) {
+    if (!options.insertAfter && endTag.tagName === targetTagName) {
       rewritingStream.emitRaw(codeToInsert);
     }
     rewritingStream.emitEndTag(endTag);
+    if (options.insertAfter && endTag.tagName === targetTagName) {
+      rewritingStream.emitRaw(codeToInsert);
+    }
   });
 
   transformStream._transform = function (chunk, _, callback) {
