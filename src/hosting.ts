@@ -3,11 +3,9 @@ import path from "path";
 import compression from "compression";
 import getPort from "get-port";
 import { ServerSideRenderFn } from "./entry-ssr";
-import { Transform, TransformCallback } from "stream";
-import { ViteDevServer } from "vite";
 import { parse as parseHTML } from "node-html-parser";
 import { readFile } from "fs/promises";
-import { RewritingStream } from "parse5-html-rewriting-stream";
+import { createStreamForTagInsertion } from "./util/createStreamForTagInsertion";
 
 export async function host(app: express.Express) {
   const isProduction = process.env.NODE_ENV === "production";
@@ -35,8 +33,7 @@ export async function host(app: express.Express) {
 
     const indexHTMLPath = path.join(clientDir, "index.html");
     const indexHTML = await readFile(indexHTMLPath, "utf-8");
-    const indexHTMLRoot = parseHTML(indexHTML);
-    const headInjection = indexHTMLRoot.querySelector("head")?.innerHTML || "";
+    const headInjection = extractHeadInjection(indexHTML);
 
     app.use(async (req, res, next) => {
       const url = req.originalUrl;
@@ -46,9 +43,9 @@ export async function host(app: express.Express) {
           path.resolve(__dirname, "ssr", "entry-ssr.js")
         )) as { render: ServerSideRenderFn };
 
-        const { pipe } = await render(url);
+        const { pipe: pipeSSR } = await render(url);
 
-        pipe(createStreamToInsertCodeAtEndOfTag("head", headInjection)).pipe(
+        pipeSSR(createStreamForTagInsertion("head", headInjection)).pipe(
           res
             .status(200)
             .set({ "Content-Type": "text/html", "Cache-Control": "no-cache" })
@@ -60,9 +57,6 @@ export async function host(app: express.Express) {
   } else {
     const { createServer: createViteServer } = await import("vite");
 
-    // Create Vite server in middleware mode and configure the app type as
-    // 'custom', disabling Vite's own HTML serving logic so parent server
-    // can take control
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -73,8 +67,6 @@ export async function host(app: express.Express) {
       appType: "custom",
     });
 
-    // use vite's connect instance as middleware
-    // if you use your own express router (express.Router()), you should use router.use
     app.use(vite.middlewares);
 
     app.use(async (req, res, next) => {
@@ -85,23 +77,21 @@ export async function host(app: express.Express) {
           path.resolve(__dirname, "..", "src", "entry-ssr.tsx")
         )) as { render: ServerSideRenderFn };
 
-        const { pipe } = await render(url);
+        const { pipe: pipeSSR } = await render(url, {
+          bootstrapModules: ["/src/entry-client.tsx"],
+        });
 
-        pipe(
-          createStreamToInsertCodeAtEndOfTag(
-            "html",
-            `<script type="module" src="/src/entry-client.tsx"></script>`,
-            {
-              insertAfter: true,
-            }
-          )
-        )
-          // .pipe(new ViteTransformIndexHtmlTransform(url, vite))
-          .pipe(new TransformIndexHtmlForViteAndReactTransform())
-          .pipe(res.status(200).setHeader("content-type", "text/html"));
+        const indexHTMLPath = path.join(__dirname, "..", "index.html");
+        const indexHTML = await readFile(indexHTMLPath, "utf-8");
+        const viteTransformed = await vite.transformIndexHtml(url, indexHTML);
+        const headInjection = extractHeadInjection(viteTransformed);
+
+        pipeSSR(
+          createStreamForTagInsertion("head", headInjection, {
+            position: "tagStart",
+          })
+        ).pipe(res.status(200).setHeader("content-type", "text/html"));
       } catch (e) {
-        // If an error is caught, let Vite fix the stack trace so it maps back to
-        // your actual source code.
         if (e instanceof Error) vite.ssrFixStacktrace(e);
         next(e);
       }
@@ -111,101 +101,10 @@ export async function host(app: express.Express) {
   return app;
 }
 
-class ViteTransformIndexHtmlTransform extends Transform {
-  private chunks: Buffer[];
+function extractHeadInjection(html: string) {
+  const indexHTMLRoot = parseHTML(html);
+  const headEl = indexHTMLRoot.querySelector("head");
+  const headInjection = headEl ? headEl.innerHTML : "";
 
-  constructor(private url: string, private vite: ViteDevServer) {
-    super();
-    this.chunks = [];
-  }
-
-  _transform(
-    chunk: Buffer,
-    _encoding: BufferEncoding,
-    callback: TransformCallback
-  ): void {
-    this.chunks.push(chunk);
-    callback();
-  }
-
-  _flush(callback: TransformCallback): void {
-    const html = Buffer.concat(this.chunks).toString("utf-8");
-
-    this.vite.transformIndexHtml(this.url, html).then((transformed) => {
-      this.push(transformed);
-      this.chunks = [];
-      callback();
-    });
-  }
-}
-
-const REACT_FAST_REFRESH_PREAMBLE = `import RefreshRuntime from '/@react-refresh'
-RefreshRuntime.injectIntoGlobalHook(window)
-window.$RefreshReg$ = () => {}
-window.$RefreshSig$ = () => (type) => type
-window.__vite_plugin_react_preamble_installed__ = true`;
-
-class TransformIndexHtmlForViteAndReactTransform extends Transform {
-  constructor() {
-    super();
-  }
-
-  _transform(
-    chunk: Buffer,
-    _encoding: BufferEncoding,
-    callback: TransformCallback
-  ): void {
-    this.push(chunk.toString("utf8"));
-    callback();
-  }
-
-  _flush(callback: TransformCallback): void {
-    this.push(
-      `<script type="module" src="/@vite/client"></script>` +
-        `<script type="module" async>${REACT_FAST_REFRESH_PREAMBLE}</script>`
-    );
-
-    callback();
-  }
-}
-
-function createStreamToInsertCodeAtEndOfTag(
-  targetTagName: string,
-  codeToInsert: string,
-  options = {
-    insertAfter: false,
-  }
-): Transform {
-  const rewritingStream = new RewritingStream();
-  const transformStream = new Transform();
-
-  rewritingStream.on("startTag", (startTag) => {
-    rewritingStream.emitStartTag(startTag);
-  });
-
-  rewritingStream.on("endTag", (endTag) => {
-    if (!options.insertAfter && endTag.tagName === targetTagName) {
-      rewritingStream.emitRaw(codeToInsert);
-    }
-    rewritingStream.emitEndTag(endTag);
-    if (options.insertAfter && endTag.tagName === targetTagName) {
-      rewritingStream.emitRaw(codeToInsert);
-    }
-  });
-
-  transformStream._transform = function (chunk, _, callback) {
-    const stringChunk = chunk.toString();
-    rewritingStream.write(stringChunk);
-    callback();
-  };
-
-  rewritingStream.on("data", (chunk) => {
-    transformStream.push(Buffer.from(chunk));
-  });
-
-  rewritingStream.on("end", () => {
-    transformStream.end();
-  });
-
-  return transformStream;
+  return headInjection;
 }
