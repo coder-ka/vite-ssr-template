@@ -87,8 +87,8 @@ export async function host(app: express.Express) {
         const headInjection = extractHeadInjection(viteTransformed);
 
         pipeSSR(
-          createStreamForTagInsertion("head", headInjection, {
-            position: "tagStart",
+          createStreamForTagInsertion("html", headInjection, {
+            position: "afterTag",
           })
         ).pipe(res.status(200).setHeader("content-type", "text/html"));
       } catch (e) {
