@@ -1,7 +1,7 @@
 # vite-ssr-template 💁‍♂️
 
 - ⚡ Vite (SSR)
-- 🌊 TailwindCSS
+- 🔯 React v18 (Async SSR using `renderToPipeableStream`)
 - 🐒 Wouter
+- 🌊 TailwindCSS
 - 🚢 Docker
-- 🔯 React v18 (Async SSR)
