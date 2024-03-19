@@ -9,7 +9,7 @@ interface InsertionOptions {
 
 export function createStreamForTagInsertion(
   targetTagName: string,
-  codeToInsert: string,
+  codeToInsert: string | Promise<string>,
   options: InsertionOptions = {}
 ): Transform {
   const { position = "tagEnd" } = options; // デフォルト値を設定
@@ -18,21 +18,29 @@ export function createStreamForTagInsertion(
 
   rewritingStream.on("startTag", (startTag) => {
     if (position === "beforeTag" && startTag.tagName === targetTagName) {
-      rewritingStream.emitRaw(codeToInsert);
+      (async function () {
+        rewritingStream.emitRaw(await codeToInsert);
+      })();
     }
     rewritingStream.emitStartTag(startTag);
     if (position === "tagStart" && startTag.tagName === targetTagName) {
-      rewritingStream.emitRaw(codeToInsert);
+      (async function () {
+        rewritingStream.emitRaw(await codeToInsert);
+      })();
     }
   });
 
   rewritingStream.on("endTag", (endTag) => {
     if (position === "tagEnd" && endTag.tagName === targetTagName) {
-      rewritingStream.emitRaw(codeToInsert);
+      (async function () {
+        rewritingStream.emitRaw(await codeToInsert);
+      })();
     }
     rewritingStream.emitEndTag(endTag);
     if (position === "afterTag" && endTag.tagName === targetTagName) {
-      rewritingStream.emitRaw(codeToInsert);
+      (async function () {
+        rewritingStream.emitRaw(await codeToInsert);
+      })();
     }
   });
 

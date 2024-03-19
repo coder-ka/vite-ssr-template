@@ -6,6 +6,7 @@ import { ServerSideRenderFn } from "./entry-ssr";
 import { parse as parseHTML } from "node-html-parser";
 import { readFile } from "fs/promises";
 import { createStreamForTagInsertion } from "./util/createStreamForTagInsertion";
+import { ViteDevServer } from "vite";
 
 export async function host(app: express.Express) {
   const isProduction = process.env.NODE_ENV === "production";
@@ -81,13 +82,8 @@ export async function host(app: express.Express) {
           bootstrapModules: ["/src/entry-client.tsx"],
         });
 
-        const indexHTMLPath = path.join(__dirname, "..", "index.html");
-        const indexHTML = await readFile(indexHTMLPath, "utf-8");
-        const viteTransformed = await vite.transformIndexHtml(url, indexHTML);
-        const headInjection = extractHeadInjection(viteTransformed);
-
         pipeSSR(
-          createStreamForTagInsertion("html", headInjection, {
+          createStreamForTagInsertion("html", createHeadInjection(vite, url), {
             position: "afterTag",
           })
         ).pipe(res.status(200).setHeader("content-type", "text/html"));
@@ -107,4 +103,11 @@ function extractHeadInjection(html: string) {
   const headInjection = headEl ? headEl.innerHTML : "";
 
   return headInjection;
+}
+
+async function createHeadInjection(vite: ViteDevServer, url: string) {
+  const indexHTMLPath = path.join(__dirname, "..", "index.html");
+  const indexHTML = await readFile(indexHTMLPath, "utf-8");
+  const viteTransformed = await vite.transformIndexHtml(url, indexHTML);
+  return extractHeadInjection(viteTransformed);
 }
