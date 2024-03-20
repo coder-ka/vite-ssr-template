@@ -1,4 +1,4 @@
-import { renderToPipeableStream } from "react-dom/server";
+import { PipeableStream, renderToPipeableStream } from "react-dom/server";
 import App from "./App";
 
 export async function render(
@@ -6,16 +6,14 @@ export async function render(
   options = {
     bootstrapModules: [] as string[],
   }
-): Promise<{
-  pipe<TStream extends NodeJS.WritableStream>(stream: TStream): TStream;
-}> {
+): Promise<PipeableStream> {
   return new Promise((resolve, reject) => {
-    const { pipe } = renderToPipeableStream(<App ssrPath={url} />, {
+    const pipeableStream = renderToPipeableStream(<App ssrPath={url} />, {
       onShellError(error) {
         reject(error);
       },
       onShellReady() {
-        resolve({ pipe });
+        resolve(pipeableStream);
       },
       bootstrapModules: options.bootstrapModules,
     });
