@@ -5,7 +5,6 @@ import getPort from "get-port";
 import { extractHeadInjection } from "../util/html";
 import { ServerSideRenderFn } from "../entry-ssr";
 import { createStreamForTagInsertion } from "../util/createStreamForTagInsertion";
-import { ViteDevServer } from "vite";
 
 export async function ssr(app: express.Express, isProduction: boolean) {
   if (isProduction) {
