@@ -80,21 +80,14 @@ export async function ssr(app: express.Express, isProduction: boolean) {
           bootstrapModules: ["/src/entry-client.tsx"],
         });
 
+        const indexHTML = await fs.readFile("./index.html", "utf-8");
+        const viteTransformed = await vite.transformIndexHtml(url, indexHTML);
+        const headInjection = extractHeadInjection(viteTransformed);
+
         pipeSSR(
-          createStreamForTagInsertion(
-            "html",
-            (async (vite: ViteDevServer, url: string) => {
-              const indexHTML = await fs.readFile("./index.html", "utf-8");
-              const viteTransformed = await vite.transformIndexHtml(
-                url,
-                indexHTML
-              );
-              return extractHeadInjection(viteTransformed);
-            })(vite, url),
-            {
-              position: "afterTag",
-            }
-          )
+          createStreamForTagInsertion("html", headInjection, {
+            position: "afterTag",
+          })
         ).pipe(res.status(200).setHeader("content-type", "text/html"));
       } catch (e) {
         if (e instanceof Error) vite.ssrFixStacktrace(e);
