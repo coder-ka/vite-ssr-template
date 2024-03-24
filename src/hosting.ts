@@ -83,9 +83,21 @@ export async function host(app: express.Express) {
         });
 
         pipeSSR(
-          createStreamForTagInsertion("html", createHeadInjection(vite, url), {
-            position: "afterTag",
-          })
+          createStreamForTagInsertion(
+            "html",
+            (async (vite: ViteDevServer, url: string) => {
+              const indexHTMLPath = path.join(__dirname, "..", "index.html");
+              const indexHTML = await readFile(indexHTMLPath, "utf-8");
+              const viteTransformed = await vite.transformIndexHtml(
+                url,
+                indexHTML
+              );
+              return extractHeadInjection(viteTransformed);
+            })(vite, url),
+            {
+              position: "afterTag",
+            }
+          )
         ).pipe(res.status(200).setHeader("content-type", "text/html"));
       } catch (e) {
         if (e instanceof Error) vite.ssrFixStacktrace(e);
@@ -103,11 +115,4 @@ function extractHeadInjection(html: string) {
   const headInjection = headEl ? headEl.innerHTML : "";
 
   return headInjection;
-}
-
-async function createHeadInjection(vite: ViteDevServer, url: string) {
-  const indexHTMLPath = path.join(__dirname, "..", "index.html");
-  const indexHTML = await readFile(indexHTMLPath, "utf-8");
-  const viteTransformed = await vite.transformIndexHtml(url, indexHTML);
-  return extractHeadInjection(viteTransformed);
 }
