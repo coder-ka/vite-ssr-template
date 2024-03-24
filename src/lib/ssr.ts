@@ -1,19 +1,15 @@
 import express from "express";
 import path from "path";
-import compression from "compression";
+import fs from "fs/promises";
 import getPort from "get-port";
-import { ServerSideRenderFn } from "./entry-ssr";
-import { parse as parseHTML } from "node-html-parser";
-import { readFile } from "fs/promises";
-import { createStreamForTagInsertion } from "./util/createStreamForTagInsertion";
+import { extractHeadInjection } from "../util/html";
+import { ServerSideRenderFn } from "../entry-ssr";
+import { createStreamForTagInsertion } from "../util/createStreamForTagInsertion";
 import { ViteDevServer } from "vite";
 
-export async function host(app: express.Express) {
-  const isProduction = process.env.NODE_ENV === "production";
+export async function ssr(app: express.Express, isProduction: boolean) {
   if (isProduction) {
-    app.use(compression());
-
-    const clientDir = path.resolve(__dirname, "client");
+    const clientDir = "dist/client";
 
     app.use(
       express.static(clientDir, {
@@ -33,7 +29,7 @@ export async function host(app: express.Express) {
     );
 
     const indexHTMLPath = path.join(clientDir, "index.html");
-    const indexHTML = await readFile(indexHTMLPath, "utf-8");
+    const indexHTML = await fs.readFile(indexHTMLPath, "utf-8");
     const headInjection = extractHeadInjection(indexHTML);
 
     app.use(async (req, res, next) => {
@@ -41,8 +37,10 @@ export async function host(app: express.Express) {
 
       try {
         const { render } = (await import(
-          path.resolve(__dirname, "ssr", "entry-ssr.js")
-        )) as { render: ServerSideRenderFn };
+          path.resolve("dist/ssr/entry-ssr.js")
+        )) as {
+          render: ServerSideRenderFn;
+        };
 
         const { pipe: pipeSSR } = await render(url);
 
@@ -75,7 +73,7 @@ export async function host(app: express.Express) {
 
       try {
         const { render } = (await vite.ssrLoadModule(
-          path.resolve(__dirname, "..", "src", "entry-ssr.tsx")
+          "./src/entry-ssr.tsx"
         )) as { render: ServerSideRenderFn };
 
         const { pipe: pipeSSR } = await render(url, {
@@ -86,8 +84,7 @@ export async function host(app: express.Express) {
           createStreamForTagInsertion(
             "html",
             (async (vite: ViteDevServer, url: string) => {
-              const indexHTMLPath = path.join(__dirname, "..", "index.html");
-              const indexHTML = await readFile(indexHTMLPath, "utf-8");
+              const indexHTML = await fs.readFile("./index.html", "utf-8");
               const viteTransformed = await vite.transformIndexHtml(
                 url,
                 indexHTML
@@ -107,12 +104,4 @@ export async function host(app: express.Express) {
   }
 
   return app;
-}
-
-function extractHeadInjection(html: string) {
-  const indexHTMLRoot = parseHTML(html);
-  const headEl = indexHTMLRoot.querySelector("head");
-  const headInjection = headEl ? headEl.innerHTML : "";
-
-  return headInjection;
 }
