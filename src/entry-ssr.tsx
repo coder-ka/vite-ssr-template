@@ -1,23 +1,23 @@
-import { PipeableStream, renderToPipeableStream } from "react-dom/server";
+import {
+  renderToPipeableStream,
+  RenderToPipeableStreamOptions,
+} from "react-dom/server";
 import App from "./App";
+import { ServerSideRenderFn } from "@coder-ka/vite-react18-ssr/server";
 
-export async function render(
+export const render: ServerSideRenderFn = (
   url: string,
-  options = {
-    bootstrapModules: [] as string[],
-  }
-): Promise<PipeableStream> {
+  options: RenderToPipeableStreamOptions = {}
+) => {
   return new Promise((resolve, reject) => {
     const pipeableStream = renderToPipeableStream(<App ssrPath={url} />, {
+      ...options,
       onShellError(error) {
         reject(error);
       },
       onShellReady() {
         resolve(pipeableStream);
       },
-      bootstrapModules: options.bootstrapModules,
     });
   });
-}
-
-export type ServerSideRenderFn = typeof render;
+};

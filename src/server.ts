@@ -2,7 +2,7 @@ import getPort from "get-port";
 import express from "express";
 import { api } from "./api";
 import compression from "compression";
-import { ssr } from "./lib/ssr";
+import { ssr } from "@coder-ka/vite-react18-ssr/server";
 
 async function createServer() {
   let app = express();

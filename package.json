@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "npm run build:server && node dist/index.cjs",
-    "build": "npm run build:client && npm run build:ssr && npm run build:server",
+    "build": "vr18s build && npm run build:server",
     "build:client": "vite build --outDir dist/client",
     "build:ssr": "vite build --outDir dist/ssr --ssr src/entry-ssr.tsx",
     "build:server": "esbuild src/server.ts --bundle --outfile=dist/index.cjs --platform=node --external:vite",
@@ -23,8 +23,9 @@
     "wouter": "^2.11.0"
   },
   "devDependencies": {
+    "@coder-ka/vite-react18-ssr": "^1.0.2",
     "@types/compression": "^1.7.2",
-    "@types/express": "^4.17.17",
+    "@types/express": "^4.17.21",
     "@types/node": "^20.3.0",
     "@types/react": "^18.0.37",
     "@types/react-dom": "^18.0.11",
